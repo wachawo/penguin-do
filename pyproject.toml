@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "penguin-do"
+version = "0.0.0"
+description = "Coming soon... The penguin is still learning to do things."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "wachawo", email = "wachawo@gmail.com" }]
+keywords = ["linux", "automation", "cli", "devops", "sysadmin", "tool"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/wachawo/penguin-do"
+Repository = "https://github.com/wachawo/penguin-do"
+Changelog = "https://github.com/wachawo/penguin-do/blob/main/CHANGELOG.md"
+
+[project.scripts]
+penguin-do = "penguin_do:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/penguin_do"]

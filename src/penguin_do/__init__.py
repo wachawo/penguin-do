@@ -1,28 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""penguin-do: placeholder package, coming soon."""
+"""penguin-do: a plain-language request turned into one shell command by a local model."""
 
-import logging
+from importlib import metadata
 
-__version__ = "0.0.0"
+try:
+    __version__ = metadata.version("penguin-do")
+except metadata.PackageNotFoundError:
+    __version__ = "0.0.0"
 
-LOGGING = {
-    "handlers": [
-        logging.StreamHandler(),
-    ],
-    "format":  "%(asctime)s.%(msecs)03d [%(levelname)s]: (%(name)s) %(message)s",
-    "level":   logging.INFO,
-    "datefmt": "%Y-%m-%d %H:%M:%S",
-}
-logger = logging.getLogger(__name__)
+# Local imports
+# Imported after __version__: model_store reads it while this package is still initialising.
+from penguin_do.cli import main  # noqa: E402
 
-
-def main() -> int:
-    # Configured here, not at import: importing a library must not touch logging.
-    logging.basicConfig(**LOGGING)
-    logger.info("Coming soon... The penguin is still learning to do things.")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+__all__ = ["__version__", "main"]

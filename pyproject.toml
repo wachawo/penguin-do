@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "penguin-do"
-version = "0.0.0"
+version = "0.0.1"
 description = "Turn a plain-language request into one shell command, see what it does, and run it only if you agree."
 readme = "README.md"
 requires-python = ">=3.11"

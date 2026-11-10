@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.1] - 2026-11-10
+
 ### Added
 
 - `penguin-do "<request>"` turns a plain-language request into one shell command with a one-line explanation, using the local dale-0.8b GGUF model through `llama-cpp-python`.

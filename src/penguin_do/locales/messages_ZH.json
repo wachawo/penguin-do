@@ -39,6 +39,8 @@
     "risk_danger": "危险：{reasons}",
     "model_missing": "模型 {name}（{size}）尚未下载。",
     "download_ask": "下载 {name}（{size}）到 {path}？[Y/n] ",
+    "model_menu": "选择要下载的模型：",
+    "model_choice": "模型 [1]：",
     "downloading": "正在下载 {name}",
     "download_done": "已保存到 {path}",
     "download_failed": "下载失败：{error}",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Plain-language request to one bash command via the local dale model."""
+"""Plain-language request to one bash command via a local model (dale or Qwen)."""
 
 import json
 import logging
@@ -21,6 +21,23 @@ SYSTEM_PROMPT = (
     '"command" is "" unless type is command; "explanation" is one short sentence in the language of the request.'
 )
 
+# dale was trained on SYSTEM_PROMPT; a general Qwen model copies its "command|refuse|unsure"
+# literally, so it gets the contract spelled out with a few examples instead.
+QWEN_SYSTEM_PROMPT = (
+    "You turn a user's request into exactly one bash command for Linux.\n"
+    "Answer with one line of JSON and nothing else, with exactly these keys:\n"
+    '{"type": T, "command": C, "explanation": E}\n'
+    'T is one of: "command" (you give a command), "refuse" (harmful or not a shell task), "unsure" (the request is unclear).\n'
+    'C is the bash command, or "" when T is not "command".\n'
+    "E is one short sentence that explains the command, written in the same language as the request.\n"
+    "Examples:\n"
+    'Request: how much free disk space\n{"type": "command", "command": "df -h", "explanation": "Shows free and used space on every mounted disk."}\n'
+    'Request: show open ports\n{"type": "command", "command": "ss -tulpn", "explanation": "Lists listening TCP and UDP ports with their processes."}\n'
+    'Request: tell me a joke\n{"type": "refuse", "command": "", "explanation": "This is not a shell task."}'
+)
+EMPTY_THINK = "<think>\n\n</think>\n\n"
+CODE_FENCE_RE = re.compile(r"^```[a-zA-Z]*\s*\n?(.*?)\n?```$", re.DOTALL)
+
 CONTEXT_TOOLS = (
     "fd", "fdfind", "rg", "bat", "batcat", "eza", "tree", "ncdu", "fzf", "jq", "yq",
     "zip", "unzip", "7z", "zstd", "xz", "unrar", "curl", "wget", "ip", "ss", "netstat",
@@ -38,7 +55,7 @@ ANSWER_KEYS = {"type", "command", "explanation"}
 
 MAX_REQUEST_BYTES = 1000
 MAX_EXPLANATION_CHARS = 240
-DALE_MAX_TOKENS = 200
+MAX_TOKENS = 200
 
 # A 1-4 char unit repeated six or more times in a row (".0.0.0.0.0.0...");
 # a plain IP address such as 10.0.0.0 repeats its unit only three times.
@@ -48,7 +65,7 @@ BIDI_CONTROLS = set("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u206
 
 @dataclass
 class Answer:
-    """One parsed dale reply."""
+    """One parsed model reply."""
 
     type: str
     command: str
@@ -61,6 +78,7 @@ class Suggestion:
 
     request: str
     request_language: str
+    model: str
     answer: Optional[Answer]
     explanation: str
     risk: Optional[shellrisk.Risk]
@@ -68,9 +86,10 @@ class Suggestion:
 
 @dataclass
 class Engine:
-    """Model callables: dale(prompt) -> text."""
+    """One loaded model: complete(prompt) -> text, and the spec that says how to prompt it."""
 
-    dale: Callable[[str], str]
+    spec: model_store.ModelSpec
+    complete: Callable[[str], str]
 
 
 def read_os_release(path: str) -> dict:
@@ -115,7 +134,27 @@ def normalize_request(text: str) -> str:
 
 def build_prompt(request: str, context: str) -> str:
     """The dale prompt, exactly as the model was trained on it."""
-    return f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{context}\n{normalize_request(request)}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    return f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\n{context}\n{normalize_request(request)}<|im_end|>\n<|im_start|>assistant\n{EMPTY_THINK}"
+
+
+def build_qwen_prompt(request: str, context: str, think: bool) -> str:
+    """The few-shot prompt for a general Qwen model; Qwen3 gets an empty think block so it answers at once."""
+    tail = EMPTY_THINK if think else ""
+    return f"<|im_start|>system\n{QWEN_SYSTEM_PROMPT}<|im_end|>\n<|im_start|>user\nSystem: {context}\nRequest: {normalize_request(request)}<|im_end|>\n<|im_start|>assistant\n{tail}"
+
+
+def build_model_prompt(spec: model_store.ModelSpec, request: str, context: str) -> str:
+    """The prompt `spec` expects."""
+    if spec.prompt == "dale":
+        return build_prompt(request, context)
+    return build_qwen_prompt(request, context, think=spec.prompt == "qwen-think")
+
+
+def strip_code_fence(text: str) -> str:
+    """Unwrap a reply the model put in a ```json fence; anything else is returned as is."""
+    stripped = text.strip()
+    match = CODE_FENCE_RE.match(stripped)
+    return match.group(1).strip() if match else stripped
 
 
 def has_control_chars(text: str) -> bool:
@@ -136,7 +175,7 @@ def clean_explanation(text: str) -> str:
 
 
 def parse_answer(text: str) -> Optional[Answer]:
-    """Parse one dale reply; None unless it follows the contract exactly."""
+    """Parse one model reply; None unless it follows the contract exactly."""
     try:
         data = json.loads(text.strip())
     except (ValueError, AttributeError):
@@ -159,23 +198,25 @@ def parse_answer(text: str) -> Optional[Answer]:
     return Answer(type=answer_type, command=command, explanation=clean_explanation(data["explanation"]))
 
 
-def ask_dale(engine, request: str, context: str) -> Optional[Answer]:
-    """One dale round trip."""
-    return parse_answer(engine.dale(build_prompt(request, context)))
+def ask_model(engine: Engine, request: str, context: str) -> Optional[Answer]:
+    """One model round trip."""
+    reply = engine.complete(build_model_prompt(engine.spec, request, context))
+    return parse_answer(strip_code_fence(reply))
 
 
-def suggest(request: str, engine=None) -> Suggestion:
-    """Ask dale for one command and rate its risk."""
+def suggest(request: str, spec: model_store.ModelSpec = model_store.DEFAULT_MODEL, engine: Optional[Engine] = None) -> Suggestion:
+    """Ask the model for one command and rate its risk."""
     if engine is None:
-        engine = make_engine()
+        engine = make_engine(spec)
     text = normalize_request(request)
     language = i18n.detect_language(text)
-    answer = ask_dale(engine, text, system_context())
+    answer = ask_model(engine, text, system_context())
     explanation = answer.explanation if answer is not None else ""
     risk = shellrisk.classify(answer.command) if answer is not None and answer.type == "command" else None
     return Suggestion(
         request=text,
         request_language=language,
+        model=engine.spec.key,
         answer=answer,
         explanation=explanation,
         risk=risk,
@@ -183,16 +224,17 @@ def suggest(request: str, engine=None) -> Suggestion:
 
 
 def make_engine(
+    spec: model_store.ModelSpec,
     load: Callable = runtime.load_model,
     generate: Callable = runtime.generate,
     path_of: Callable = model_store.model_path,
 ) -> Engine:
-    """Production engine: the model is loaded on first use."""
+    """Production engine for `spec`: the model is loaded on first use."""
 
-    def dale(prompt: str) -> str:
-        return generate(load(path_of(model_store.DALE)), prompt, DALE_MAX_TOKENS, stop=runtime.DEFAULT_STOP)
+    def complete(prompt: str) -> str:
+        return generate(load(path_of(spec)), prompt, MAX_TOKENS, stop=runtime.DEFAULT_STOP)
 
-    return Engine(dale=dale)
+    return Engine(spec=spec, complete=complete)
 
 
 def main():

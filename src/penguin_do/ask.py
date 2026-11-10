@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import traceback
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 # Local imports
 from penguin_do import colors, i18n, model_store, nl2bash, runtime, shellrisk
@@ -127,26 +127,62 @@ def download_model(spec, lang: str) -> bool:
     return True
 
 
-def ensure_dale(lang: str) -> Optional[int]:
-    """Make sure the dale model is on disk. None when ready, else the exit code to return."""
-    spec = model_store.DALE
-    if model_store.is_present(spec):
-        return None
-    size = model_store.human_size(spec.size)
+def model_menu_lines() -> List[str]:
+    """One numbered line per model: key, size, whether it is on disk, what it is."""
+    lines = []
+    for number, spec in enumerate(model_store.MODELS.values(), start=1):
+        present = colors.green(" (downloaded)") if model_store.is_present(spec) else ""
+        lines.append(f"  {number}) {spec.key:<13} {model_store.human_size(spec.size):>7}  {colors.dim(spec.description)}{present}")
+    return lines
+
+
+def choose_model(lang: str) -> Optional[model_store.ModelSpec]:
+    """Ask which model to download: a number or a key, Enter means the first (dale). None on Ctrl+C / EOF."""
+    specs = list(model_store.MODELS.values())
+    sys.stdout.write(i18n.message("model_menu", lang) + "\n" + "\n".join(model_menu_lines()) + "\n")
+    while True:
+        answer = read_line(i18n.message("model_choice", lang))
+        if answer is None:
+            return None
+        choice = answer.strip().lower()
+        if choice == "":
+            return specs[0]
+        if choice.isdigit() and 1 <= int(choice) <= len(specs):
+            return specs[int(choice) - 1]
+        if choice in model_store.MODELS:
+            return model_store.MODELS[choice]
+
+
+def ensure_model(cli_key: Optional[str], lang: str) -> Tuple[Optional[model_store.ModelSpec], Optional[int]]:
+    """Pick the model and make sure it is on disk: (spec, None) when ready, else (None, exit code).
+
+    With no model chosen and none downloaded, a terminal gets the download menu and the pick is remembered.
+    """
+    spec = model_store.resolve_model(cli_key)
+    if spec is not None and model_store.is_present(spec):
+        return spec, None
     if not is_interactive():
-        sys.stderr.write(i18n.message("model_missing", lang, name=spec.filename, size=size) + "\n")
-        sys.stderr.write("  penguin-do --pull\n")
-        return RC_MISSING
-    answer = ask_yes_no(i18n.message("download_ask", lang, name=spec.filename, size=size, path=model_store.model_path(spec)))
-    if answer is None:
-        sys.stdout.write(i18n.message("cancelled", lang) + "\n")
-        return RC_INTERRUPTED
-    if not answer:
-        sys.stdout.write(i18n.message("cancelled", lang) + "\n")
-        return RC_CANCELLED
-    if not download_model(spec, lang):
-        return RC_CANCELLED
-    return None
+        shown = spec or model_store.DEFAULT_MODEL
+        sys.stderr.write(i18n.message("model_missing", lang, name=shown.filename, size=model_store.human_size(shown.size)) + "\n")
+        sys.stderr.write(f"  penguin-do --pull {shown.key}\n" if spec is not None else "  penguin-do --pull\n")
+        return None, RC_MISSING
+    remember = spec is None
+    if spec is None:
+        spec = choose_model(lang)
+        if spec is None:
+            sys.stdout.write(i18n.message("cancelled", lang) + "\n")
+            return None, RC_INTERRUPTED
+    else:
+        size = model_store.human_size(spec.size)
+        answer = ask_yes_no(i18n.message("download_ask", lang, name=spec.filename, size=size, path=model_store.model_path(spec)))
+        if not answer:
+            sys.stdout.write(i18n.message("cancelled", lang) + "\n")
+            return None, RC_INTERRUPTED if answer is None else RC_CANCELLED
+    if not model_store.is_present(spec) and not download_model(spec, lang):
+        return None, RC_CANCELLED
+    if remember:
+        model_store.save_model_key(spec.key)
+    return spec, None
 
 
 def answer_type(suggestion) -> str:
@@ -177,6 +213,7 @@ def render_json(suggestion, ui_lang: str) -> str:
         "request": suggestion.request,
         "language": suggestion.request_language,
         "ui_language": ui_lang,
+        "model": suggestion.model,
         "type": answer_type(suggestion),
         "command": answer_command(suggestion),
         "explanation": suggestion.explanation,
@@ -358,11 +395,11 @@ def confirm_and_run(command: str, risk, lang: str) -> int:
         danger = True
 
 
-def request_suggestion(request: str, ui_lang: str):
+def request_suggestion(request: str, ui_lang: str, spec: model_store.ModelSpec):
     """Call the model with a transient `thinking` line on stderr."""
     show_status(i18n.message("thinking", ui_lang))
     try:
-        return nl2bash.suggest(request)
+        return nl2bash.suggest(request, spec)
     finally:
         clear_status()
 
@@ -379,12 +416,12 @@ def cmd_ask(args: argparse.Namespace) -> int:
         return RC_USAGE
     if not runtime.runtime_available():
         return report_runtime_missing(ui_lang)
-    missing_rc = ensure_dale(ui_lang)
+    spec, missing_rc = ensure_model(getattr(args, "model", None), ui_lang)
     if missing_rc is not None:
         return missing_rc
 
     try:
-        suggestion = request_suggestion(request, ui_lang)
+        suggestion = request_suggestion(request, ui_lang, spec)
     except KeyboardInterrupt:
         sys.stdout.write(i18n.message("cancelled", ui_lang) + "\n")
         return RC_INTERRUPTED
@@ -427,16 +464,14 @@ def report_runtime_missing(lang: str) -> int:
     return RC_MISSING
 
 
-def selected_models() -> List:
-    return [model_store.DALE]
-
-
 def model_status_rows() -> List[dict]:
+    active = model_store.resolve_model()
     rows = []
     for key, spec in model_store.MODELS.items():
         rows.append(
             {
                 "key": key,
+                "active": active is not None and active.key == key,
                 "present": model_store.is_present(spec),
                 "size": spec.size,
                 "size_human": model_store.human_size(spec.size),
@@ -457,12 +492,15 @@ def print_model_status(output_format: str) -> int:
     if output_format == "plain":
         for row in rows:
             present = "yes" if row["present"] else "no"
-            sys.stdout.write(f"{row['key']}\t{present}\t{row['size_human']}\t{row['path']}\t{row['license']}\n")
+            active = "active" if row["active"] else "-"
+            sys.stdout.write(f"{row['key']}\t{present}\t{active}\t{row['size_human']}\t{row['path']}\t{row['license']}\n")
         return 0
     sys.stdout.write(colors.section("MODELS") + "\n")
     for row in rows:
         present = colors.green("yes") if row["present"] else colors.yellow("no ")
-        sys.stdout.write(f"  {row['key']:<11} {present}  {row['size_human']:>7}  {row['path']}  {colors.dim(row['license'])}\n")
+        marker = colors.green("*", bold=True) if row["active"] else " "
+        sys.stdout.write(f"{marker} {row['key']:<13} {present}  {row['size_human']:>7}  {row['path']}  {colors.dim(row['license'])}\n")
+    sys.stdout.write(colors.dim(f"  * the model in use; change it with --pull MODEL, --model MODEL or PENGUIN_DO_MODEL") + "\n")
     if not runtime.runtime_available():
         sys.stdout.write(colors.dim(f"  runtime llama-cpp-python is not installed: {runtime.INSTALL_HINT}") + "\n")
     return 0
@@ -486,7 +524,12 @@ def pull_models(specs: List, output_format: str) -> int:
             clear_status()
             results.append({"key": spec.key, "ok": False, "path": path, "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
     print_model_results(results, output_format)
-    return 0 if all(result["ok"] for result in results) else 1
+    if not all(result["ok"] for result in results):
+        return 1
+    model_store.save_model_key(specs[-1].key)
+    if output_format == "text":
+        sys.stdout.write(colors.dim(f"  {specs[-1].key} is the model in use now") + "\n")
+    return 0
 
 
 def remove_models(specs: List, output_format: str) -> int:
@@ -495,6 +538,7 @@ def remove_models(specs: List, output_format: str) -> int:
         removed = model_store.remove(spec)
         status = "removed" if removed else "absent"
         results.append({"key": spec.key, "ok": True, "path": model_store.model_path(spec), "status": status, "error": None})
+        model_store.forget_model_key(spec.key)
     print_model_results(results, output_format)
     return 0
 
@@ -507,21 +551,35 @@ def print_model_results(results: List[dict], output_format: str) -> None:
         if output_format == "plain":
             sys.stdout.write(f"{result['key']}\t{result['status']}\t{result['path']}\n")
         elif result["ok"]:
-            sys.stdout.write(f"  {result['key']:<11} {colors.green(result['status'])}  {result['path']}\n")
+            sys.stdout.write(f"  {result['key']:<13} {colors.green(result['status'])}  {result['path']}\n")
         else:
-            sys.stdout.write(f"  {result['key']:<11} {colors.red(result['status'])}  {result['error']}\n")
+            sys.stdout.write(f"  {result['key']:<13} {colors.red(result['status'])}  {result['error']}\n")
+
+
+def pull_target(key: str, output_format: str) -> Optional[model_store.ModelSpec]:
+    """The model `--pull` downloads: the named one, else the menu in a terminal, else dale. None on Ctrl+C / EOF."""
+    if key:
+        return model_store.MODELS[key]
+    if output_format == "text" and is_interactive():
+        return choose_model(i18n.resolve_ui_language(None, None))
+    return model_store.DEFAULT_MODEL
 
 
 def cmd_model(args: argparse.Namespace) -> int:
-    """`penguin-do --models | --pull | --rm`: status, download or removal of the dale model."""
+    """`penguin-do --models | --pull [MODEL] | --rm [MODEL]`: status, download or removal of a model."""
     action = getattr(args, "action", None) or "status"
     output_format = getattr(args, "format", None) or "text"
+    key = getattr(args, "model_key", None) or ""
     if action == "status":
         return print_model_status(output_format)
-    specs = selected_models()
     if action == "pull":
-        return pull_models(specs, output_format)
-    return remove_models(specs, output_format)
+        spec = pull_target(key, output_format)
+        if spec is None:
+            return RC_INTERRUPTED
+        return pull_models([spec], output_format)
+    # --rm without a name removes the model in use.
+    spec = model_store.MODELS[key] if key else (model_store.resolve_model() or model_store.DEFAULT_MODEL)
+    return remove_models([spec], output_format)
 
 
 def main():

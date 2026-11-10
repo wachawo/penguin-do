@@ -75,6 +75,8 @@
     "risk_danger": "PELIGRO: {reasons}",
     "model_missing": "El modelo {name} ({size}) aún no se ha descargado.",
     "download_ask": "¿Descargar {name} ({size}) en {path}? [Y/n] ",
+    "model_menu": "Elige un modelo para descargar:",
+    "model_choice": "Modelo [1]: ",
     "downloading": "Descargando {name}",
     "download_done": "Guardado en {path}",
     "download_failed": "Error en la descarga: {error}",

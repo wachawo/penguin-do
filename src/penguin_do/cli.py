@@ -9,7 +9,7 @@ import sys
 from typing import List, Optional
 
 # Local imports
-from penguin_do import __version__, colors, i18n
+from penguin_do import __version__, colors, i18n, model_store
 
 DESCRIPTION = "Turn a plain-language request into one shell command with a short explanation, and ask before running it."
 RC_ERROR = 1
@@ -35,7 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
         '  penguin-do "who is using swap?"                  # suggest a command and ask before running it\n'
         '  penguin-do -n "show the biggest files in /var"   # print the command without running it\n'
         '  penguin-do -f json "list listening ports"        # machine-readable answer\n'
-        "  penguin-do --pull                                # download the local model\n",
+        "  penguin-do --pull                                # choose and download a local model\n"
+        "  penguin-do --model qwen2.5-1.5b \"free disk\"      # use another downloaded model once\n",
     )
     parser.add_argument("request", nargs="*", help="The request in plain language, in any of the supported languages")
     parser.add_argument("-n", "--dry-run", action="store_true", help="Print the suggested command without offering to run it")
@@ -47,15 +48,35 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="CODE",
         help=f"UI language: {' '.join(i18n.LANGUAGES)}. Default: the PENGUIN_DO_LANG env var, then the language of the request, then $LANG.",
     )
+    model_keys = list(model_store.MODELS)
+    parser.add_argument(
+        "--model",
+        choices=model_keys,
+        default=None,
+        metavar="MODEL",
+        help=f"Model for this run: {' '.join(model_keys)}. Default: PENGUIN_DO_MODEL, then the one chosen with --pull.",
+    )
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="More logging (-v info, -vv debug); errors show a traceback")
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce logging output")
     parser.add_argument("-V", "--version", action="version", version=f"penguin-do {__version__}")
     models = parser.add_mutually_exclusive_group()
-    models.add_argument("--models", dest="action", action="store_const", const="status", help="Show the local model status")
-    models.add_argument("--pull", dest="action", action="store_const", const="pull", help="Download the local model")
-    models.add_argument("--rm", dest="action", action="store_const", const="rm", help="Remove the local model and any partial download")
+    models.add_argument("--models", action="store_true", help="Show the local models and which one is in use")
+    models.add_argument("--pull", nargs="?", const="", default=None, metavar="MODEL", help="Download a model and use it from now on; without MODEL a menu asks which")
+    models.add_argument("--rm", nargs="?", const="", default=None, metavar="MODEL", help="Remove a model and any partial download; without MODEL the one in use")
     return parser
+
+
+def model_action(args: argparse.Namespace) -> Optional[str]:
+    """Which of --models, --pull, --rm was given (they exclude each other), and its MODEL in args.model_key."""
+    args.model_key = args.pull or args.rm or ""
+    if args.models:
+        return "status"
+    if args.pull is not None:
+        return "pull"
+    if args.rm is not None:
+        return "rm"
+    return None
 
 
 def configure_logging(verbose: int, quiet: bool) -> None:
@@ -80,6 +101,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         argv, tail = argv[:cut], argv[cut + 1:]
     args = parser.parse_intermixed_args(argv)
     args.request = list(args.request) + tail
+    args.action = model_action(args)
+    if args.model_key and args.model_key not in model_store.MODELS:
+        parser.error(f"unknown model {args.model_key!r}; choose from {', '.join(model_store.MODELS)}")
     if args.action and args.request:
         parser.error("a request cannot be combined with --models, --pull or --rm")
 

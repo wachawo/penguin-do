@@ -35,6 +35,8 @@
     "risk_danger": "危険: {reasons}",
     "model_missing": "モデル {name}（{size}）はまだダウンロードされていません。",
     "download_ask": "{name}（{size}）を {path} にダウンロードしますか？ [Y/n] ",
+    "model_menu": "ダウンロードするモデルを選んでください:",
+    "model_choice": "モデル [1]: ",
     "downloading": "{name} をダウンロード中",
     "download_done": "{path} に保存しました",
     "download_failed": "ダウンロードに失敗しました: {error}",

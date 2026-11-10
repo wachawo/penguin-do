@@ -41,6 +41,7 @@ class ModelSpec:
     sha256: str
     license: str
     description: str
+    prompt: str
 
 
 class DownloadError(Exception):
@@ -58,10 +59,34 @@ DALE = ModelSpec(
     size=529297952,
     sha256="8738d2535680cf7b8227001013a0ba6e6b2a4c8e8f3d149fd181c17cb96e2d3d",
     license="Apache-2.0",
-    description="dale-0.8b: plain-language request to one bash command",
+    description="dale-0.8b: trained to turn a request into one bash command",
+    prompt="dale",
 )
 
-MODELS: Dict[str, ModelSpec] = {"dale": DALE}
+QWEN35 = ModelSpec(
+    key="qwen3.5-0.8b",
+    repo="ggml-org/Qwen3.5-0.8B-GGUF",
+    filename="Qwen3.5-0.8B-Q4_0.gguf",
+    size=563036064,
+    sha256="57d1997790d1744fba5b40a7317df71ea5e2acee28c47e78f0cce39c0703f8cf",
+    license="Apache-2.0",
+    description="Qwen3.5-0.8B: general small model, same size as dale",
+    prompt="qwen-think",
+)
+
+QWEN25 = ModelSpec(
+    key="qwen2.5-1.5b",
+    repo="Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+    filename="qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    size=1117320736,
+    sha256="6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+    license="Apache-2.0",
+    description="Qwen2.5-1.5B-Instruct: general model, twice the size of dale",
+    prompt="qwen",
+)
+
+MODELS: Dict[str, ModelSpec] = {spec.key: spec for spec in (DALE, QWEN35, QWEN25)}
+DEFAULT_MODEL = DALE
 
 
 def models_dir() -> str:
@@ -71,6 +96,53 @@ def models_dir() -> str:
         return os.path.expanduser(override)
     cache_home = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
     return os.path.join(cache_home, "penguin-do", "models")
+
+
+def config_path() -> str:
+    """File holding the key of the chosen model: $XDG_CONFIG_HOME/penguin-do/model."""
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(config_home, "penguin-do", "model")
+
+
+def saved_model_key() -> Optional[str]:
+    """The model key saved by the download menu or --pull; None when absent or not a known key."""
+    try:
+        with open(config_path(), encoding="utf-8") as handle:
+            key = handle.read().strip()
+    except OSError:
+        return None
+    return key if key in MODELS else None
+
+
+def save_model_key(key: str) -> bool:
+    """Remember `key` as the model to use; False when the file cannot be written."""
+    path = config_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(key + "\n")
+    except OSError as exc:
+        logger.warning(f"Cannot save the model choice to {path}: {type(exc).__name__}: {exc}")
+        return False
+    return True
+
+
+def forget_model_key(key: str) -> None:
+    """Drop the saved choice when it names `key`."""
+    if saved_model_key() == key:
+        remove_quietly(config_path())
+
+
+def resolve_model(cli_key: Optional[str] = None) -> Optional[ModelSpec]:
+    """The model to use: --model, then $PENGUIN_DO_MODEL, then the saved choice, then the first one on disk."""
+    env_key = os.environ.get("PENGUIN_DO_MODEL", "").strip()
+    if env_key and env_key not in MODELS:
+        logger.warning(f"PENGUIN_DO_MODEL={env_key} is not one of {', '.join(MODELS)}; ignored")
+        env_key = ""
+    key = cli_key or env_key or saved_model_key()
+    if key:
+        return MODELS[key]
+    return next((spec for spec in MODELS.values() if is_present(spec)), None)
 
 
 def model_path(spec: ModelSpec) -> str:

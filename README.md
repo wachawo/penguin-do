@@ -80,13 +80,14 @@ those before penguin-do sees them.
 | `-n`, `--dry-run`                   | show the suggestion and stop, never prompt or run               |
 | `-f`, `--format text\|plain\|json`  | output format (default `text`), also for the model flags        |
 | `--lang CODE`                       | language of messages: `en es pt fr de it ru zh ja hi ko`        |
+| `--model MODEL`                     | model for this run only: `dale qwen3.5-0.8b qwen2.5-1.5b`       |
 | `--no-color`                        | disable colored output                                          |
 | `-v`, `--verbose`                   | more logging (`-v` info, `-vv` debug); errors show a traceback  |
 | `-q`, `--quiet`                     | errors only in the log                                          |
 | `-V`, `--version`                   | print `penguin-do <version>`                                    |
-| `--models`                          | show the model status                                           |
-| `--pull`                            | download the model                                              |
-| `--rm`                              | remove the model and any partial download                       |
+| `--models`                          | show the models and which one is in use                         |
+| `--pull [MODEL]`                    | download a model and use it from now on; no MODEL: a menu       |
+| `--rm [MODEL]`                      | remove a model and any partial download; no MODEL: the one in use |
 
 `--models`, `--pull` and `--rm` exclude each other and cannot be combined with
 a request.
@@ -177,22 +178,51 @@ offline, deterministic, and it never executes anything. It splits the line on
 It is a seatbelt, not a sandbox. It reads text only, so it cannot know what a
 script you call does or which file a variable points at.
 
-## Model
+## Models
 
-| key    | model                                                                        | size   | license    | author        |
-|--------|------------------------------------------------------------------------------|--------|------------|---------------|
-| `dale` | [dale-0.8b](https://huggingface.co/manuelgscom/dale-0.8b-GGUF), Q4_K_M GGUF | 529 MB | Apache-2.0 | Manuel García |
+| key            | model                                                                                       | size   | license    | author        |
+|----------------|---------------------------------------------------------------------------------------------|--------|------------|---------------|
+| `dale`         | [dale-0.8b](https://huggingface.co/manuelgscom/dale-0.8b-GGUF), Q4_K_M GGUF                | 529 MB | Apache-2.0 | Manuel García |
+| `qwen3.5-0.8b` | [Qwen3.5-0.8B](https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF), Q4_0 GGUF               | 563 MB | Apache-2.0 | Qwen team     |
+| `qwen2.5-1.5b` | [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF), Q4_K_M GGUF | 1.1 GB | Apache-2.0 | Qwen team     |
 
-The model is downloaded on the first request: in a terminal penguin-do asks
-`Download dale-0.8b-1.0.0-Q4_K_M.gguf (529 MB) to ...? [Y/n]`, and Enter means
-yes. Without a terminal it never downloads anything and suggests
-`penguin-do --pull` instead.
+dale is trained for exactly this task and is the default. The two Qwen models
+are general chat models prompted with a few examples: Qwen3.5-0.8B is the same
+size as dale but its commands are often wrong, Qwen2.5-1.5B is twice the size
+and closer to dale.
+
+On the first request with no model downloaded, a terminal gets a menu:
+
+```
+Choose a model to download:
+  1) dale           529 MB  dale-0.8b: trained to turn a request into one bash command
+  2) qwen3.5-0.8b   563 MB  Qwen3.5-0.8B: general small model, same size as dale
+  3) qwen2.5-1.5b   1.1 GB  Qwen2.5-1.5B-Instruct: general model, twice the size of dale
+Model [1]:
+```
+
+Enter picks dale. The pick is downloaded and remembered. Without a terminal
+penguin-do never downloads anything and suggests `penguin-do --pull` instead.
+
+The model used for a request is the first of these that is set:
+
+1. `--model MODEL`
+2. `PENGUIN_DO_MODEL`
+3. the choice saved by the menu or `--pull` in `$XDG_CONFIG_HOME/penguin-do/model`
+   (`~/.config/penguin-do/model`)
+4. the first downloaded model in the table above
+
+When the chosen model is not downloaded yet, a terminal is asked
+`Download <file> (<size>) to ...? [Y/n]`.
 
 ```bash
-penguin-do --models             # present yes/no, size, path, license
+penguin-do --models                # present yes/no, * marks the model in use
 penguin-do --models -f json
-penguin-do --pull               # download the model, e.g. before going offline
-penguin-do --rm                 # delete the model, its .part and .lock files
+penguin-do --pull                  # menu, then download and use the pick
+penguin-do --pull qwen2.5-1.5b     # download this one and use it from now on
+penguin-do --model dale "free disk"  # another downloaded model, this run only
+penguin-do --rm                    # delete the model in use, its .part and .lock files
+penguin-do --rm qwen3.5-0.8b       # delete this one
 ```
 
 How downloads behave:
@@ -211,9 +241,11 @@ The first of these that is set wins:
 2. `$XDG_CACHE_HOME/penguin-do/models`
 3. `~/.cache/penguin-do/models`
 
-| file                          | bytes     | sha256                                                             |
-|-------------------------------|-----------|--------------------------------------------------------------------|
-| `dale-0.8b-1.0.0-Q4_K_M.gguf` | 529297952 | `8738d2535680cf7b8227001013a0ba6e6b2a4c8e8f3d149fd181c17cb96e2d3d` |
+| file                                | bytes      | sha256                                                             |
+|-------------------------------------|------------|--------------------------------------------------------------------|
+| `dale-0.8b-1.0.0-Q4_K_M.gguf`       | 529297952  | `8738d2535680cf7b8227001013a0ba6e6b2a4c8e8f3d149fd181c17cb96e2d3d` |
+| `Qwen3.5-0.8B-Q4_0.gguf`            | 563036064  | `57d1997790d1744fba5b40a7317df71ea5e2acee28c47e78f0cce39c0703f8cf` |
+| `qwen2.5-1.5b-instruct-q4_k_m.gguf` | 1117320736 | `6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e` |
 
 On a machine without internet access, download the file from the model page on
 another machine, check it with `sha256sum`, and copy it into the models
@@ -252,8 +284,10 @@ in English.
 | variable                 | meaning                                                        |
 |--------------------------|----------------------------------------------------------------|
 | `PENGUIN_DO_LANG`        | language of messages                                           |
-| `PENGUIN_DO_MODELS_DIR`  | where the model is stored                                      |
+| `PENGUIN_DO_MODEL`       | model to use: `dale`, `qwen3.5-0.8b` or `qwen2.5-1.5b`         |
+| `PENGUIN_DO_MODELS_DIR`  | where the models are stored                                    |
 | `XDG_CACHE_HOME`         | base of the default models directory                           |
+| `XDG_CONFIG_HOME`        | base of the file that remembers the chosen model               |
 | `HF_ENDPOINT`            | Hugging Face mirror to download from                           |
 | `https_proxy`            | HTTP proxy for the download                                    |
 | `PENGUIN_DO_DEBUG`       | show the traceback of an unexpected error                      |
@@ -276,12 +310,13 @@ in English.
 - Your request, the context line and the explanation stay on the machine.
 - The download comes from `https://huggingface.co/<repo>/resolve/main/<file>`,
   or from `$HF_ENDPOINT` when it is set.
-- The model is a plain file in the models directory. `penguin-do --rm` removes it.
+- Each model is a plain file in the models directory. `penguin-do --rm MODEL` removes it.
 
 ## Credits
 
-The model is [dale-0.8b](https://huggingface.co/manuelgscom/dale-0.8b-GGUF) by
-Manuel García, released under the Apache-2.0 license.
+- [dale-0.8b](https://huggingface.co/manuelgscom/dale-0.8b-GGUF) by Manuel García, Apache-2.0.
+- [Qwen3.5-0.8B](https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF) and
+  [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF) by the Qwen team, Apache-2.0.
 
 ## License
 

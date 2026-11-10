@@ -32,6 +32,8 @@
     "risk_danger": "위험: {reasons}",
     "model_missing": "모델 {name}({size})이(가) 아직 다운로드되지 않았습니다.",
     "download_ask": "{name}({size})을(를) {path}에 다운로드할까요? [Y/n] ",
+    "model_menu": "다운로드할 모델을 선택하세요:",
+    "model_choice": "모델 [1]: ",
     "downloading": "{name} 다운로드 중",
     "download_done": "{path}에 저장했습니다",
     "download_failed": "다운로드 실패: {error}",

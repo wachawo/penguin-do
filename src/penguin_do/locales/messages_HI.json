@@ -40,6 +40,8 @@
     "risk_danger": "खतरा: {reasons}",
     "model_missing": "मॉडल {name} ({size}) अभी डाउनलोड नहीं हुआ है।",
     "download_ask": "{name} ({size}) को {path} में डाउनलोड करें? [Y/n] ",
+    "model_menu": "डाउनलोड करने के लिए मॉडल चुनें:",
+    "model_choice": "मॉडल [1]: ",
     "downloading": "{name} डाउनलोड हो रहा है",
     "download_done": "{path} में सहेजा गया",
     "download_failed": "डाउनलोड विफल रहा: {error}",

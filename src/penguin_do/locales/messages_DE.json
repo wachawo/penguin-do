@@ -75,6 +75,8 @@
     "risk_danger": "GEFAHR: {reasons}",
     "model_missing": "Das Modell {name} ({size}) ist noch nicht heruntergeladen.",
     "download_ask": "{name} ({size}) nach {path} herunterladen? [Y/n] ",
+    "model_menu": "Modell zum Herunterladen wählen:",
+    "model_choice": "Modell [1]: ",
     "downloading": "Lade {name} herunter",
     "download_done": "Gespeichert unter {path}",
     "download_failed": "Download fehlgeschlagen: {error}",

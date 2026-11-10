@@ -75,6 +75,8 @@
     "risk_danger": "DANGER: {reasons}",
     "model_missing": "Model {name} ({size}) is not downloaded yet.",
     "download_ask": "Download {name} ({size}) to {path}? [Y/n] ",
+    "model_menu": "Choose a model to download:",
+    "model_choice": "Model [1]: ",
     "downloading": "Downloading {name}",
     "download_done": "Saved to {path}",
     "download_failed": "Download failed: {error}",
